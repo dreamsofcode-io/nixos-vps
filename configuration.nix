@@ -1,5 +1,4 @@
-{ ... }:
-let
+{...}: let
   sshKeys = [
   ];
 in {
@@ -11,11 +10,12 @@ in {
     ./services/cloudflared.nix
   ];
 
-  services.tailscale.enable = true;
+  # Enable Tailscale. Requires setting up an auth key and adding it to nix-sops
+  services.tailscale.enable = false;
 
+  # Enable Cloudflared. Please check documentation for how to configure.
   services.cloudflared = {
     enable = false;
-    # Set your tunnel UUID before enabling.
     tunnelId = "";
   };
 
@@ -30,6 +30,8 @@ in {
     X11Forwarding = false;
   };
 
+  # Generate a hashed password using the below commmand
+  # nix run 'nixpkgs#mkpasswd' -- --method=yescrypt
   users.users.admin = {
     isNormalUser = true;
     description = "Admin account for VPS";
