@@ -7,6 +7,17 @@ in {
     ./vps_configuration.nix
   ];
 
+  services.openssh.settings = {
+    PermitRootLogin = "no";
+    AllowUsers = ["admin"];
+    AuthenticationMethods = "publickey";
+    PubkeyAuthentication = true;
+    PasswordAuthentication = false;
+    KbdInteractiveAuthentication = false;
+    PermitEmptyPasswords = false;
+    X11Forwarding = false;
+  };
+
   users.users.admin = {
     isNormalUser = true;
     description = "Admin account for VPS";
