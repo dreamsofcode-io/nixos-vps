@@ -1,7 +1,12 @@
 # NixOS system configuration for the Hostinger KVM template.
 # Built into a qcow2 by image.nix via nixpkgs' make-disk-image (no nixos-infect).
-{ config, lib, pkgs, modulesPath, ... }:
 {
+  config,
+  lib,
+  pkgs,
+  modulesPath,
+  ...
+}: {
   imports = [
     # virtio_scsi/virtio_blk etc. in the initrd so the image boots on Proxmox.
     "${modulesPath}/profiles/qemu-guest.nix"
@@ -25,7 +30,7 @@
 
   # Serial console for Proxmox serial0 + memory hotplug, mirroring GRUB_CMDLINE_LINUX
   # in the other templates.
-  boot.kernelParams = [ "console=tty0" "console=ttyS0,115200" "earlyprintk=ttyS0,115200" "consoleblank=0" "memhp_default_state=online" ];
+  boot.kernelParams = ["console=tty0" "console=ttyS0,115200" "earlyprintk=ttyS0,115200" "consoleblank=0" "memhp_default_state=online"];
 
   # QEMU guest agent: how Proxmox/hVPS talk to the VM (udev-started qemu-guest-agent.service).
   services.qemuGuest.enable = true;
@@ -34,7 +39,7 @@
   # Proxmox exposes config through the NoCloud datasource; pin it (NixOS ships no default).
   services.cloud-init.enable = true;
   services.cloud-init.network.enable = true;
-  services.cloud-init.settings.datasource_list = [ "NoCloud" "ConfigDrive" ];
+  services.cloud-init.settings.datasource_list = ["NoCloud" "ConfigDrive"];
   # The keys-to-console module's helper (write-ssh-key-fingerprints) isn't shipped in NixOS's
   # cloud-init package, so it errors and downgrades cloud-init to "degraded done" (exit 2).
   # It only prints host-key fingerprints to the console — disable it for a clean exit 0.
@@ -51,17 +56,21 @@
   # that hVPS verification invokes by bare name (e.g. `dig` for a DNS check).
   environment.systemPackages = with pkgs; [
     cloud-init
-    dnsutils   # dig, nslookup, host
-    nettools   # ifconfig, netstat, route (net-tools parity)
+    dnsutils # dig, nslookup, host
+    nettools # ifconfig, netstat, route (net-tools parity)
     curl
     wget
     nano
   ];
+
   systemd.services.qemu-guest-agent.environment.PATH =
     lib.mkForce "/run/wrappers/bin:/run/current-system/sw/bin:/bin";
 
   services.openssh.enable = true;
   services.openssh.settings.PermitRootLogin = lib.mkDefault "yes";
+
+  # Preserve the hostname set in flake.nix.
+  services.cloud-init.settings.preserve_hostname = true;
 
   system.stateVersion = "26.05";
 }
