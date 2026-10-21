@@ -6,6 +6,7 @@ in {
   imports = [
     ./vps_configuration.nix
     ./secrets.nix
+    ./containers.nix
     ./services/tailscale.nix
     ./services/cloudflared.nix
   ];

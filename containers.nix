@@ -1,0 +1,4 @@
+{ ... }:
+{
+  virtualisation.oci-containers.containers = {};
+}
