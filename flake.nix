@@ -7,13 +7,21 @@
     inputs.nixpkgs.follows = "nixpkgs";
   };
 
-  outputs = { nixpkgs, sops-nix, ... }: {
-    nixosConfigurations.vps = nixpkgs.lib.nixosSystem {
+  outputs = { nixpkgs, sops-nix, ... }:
+  let
+    mkVps = hostname: extraModules: nixpkgs.lib.nixosSystem {
       system = "x86_64-linux";
       modules = [
         sops-nix.nixosModules.sops
+        { networking.hostName = hostname; }
         ./configuration.nix
-      ];
+      ] ++ extraModules;
+    };
+  in {
+    nixosConfigurations = {
+      vps = mkVps "vps" [];
+      # Add another VPS with optional per-server settings:
+      # vps2 = mkVps "vps2" [ { time.timeZone = "Europe/London"; } ];
     };
   };
 }
