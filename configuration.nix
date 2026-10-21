@@ -5,6 +5,7 @@ let
 in {
   imports = [
     ./vps_configuration.nix
+    ./secrets.nix
   ];
 
   services.openssh.settings = {
