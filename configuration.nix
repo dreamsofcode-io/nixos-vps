@@ -7,12 +7,19 @@ in {
     ./vps_configuration.nix
     ./secrets.nix
     ./services/tailscale.nix
+    ./services/cloudflared.nix
   ];
 
   # Preserve the hostname set in flake.nix.
   services.cloud-init.settings.preserve_hostname = true;
 
   services.tailscale.enable = true;
+
+  services.cloudflared = {
+    enable = false;
+    # Set your tunnel UUID before enabling.
+    tunnelId = "";
+  };
 
   services.openssh.settings = {
     PermitRootLogin = "no";
