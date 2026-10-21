@@ -6,7 +6,10 @@ in {
   imports = [
     ./vps_configuration.nix
     ./secrets.nix
+    ./services/tailscale.nix
   ];
+
+  services.tailscale.enable = true;
 
   services.openssh.settings = {
     PermitRootLogin = "no";
