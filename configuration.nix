@@ -10,6 +10,8 @@ in {
     ./services/cloudflared.nix
   ];
 
+  nix.settings.experimental-features = ["nix-command" "flakes"];
+
   # Enable Tailscale. Requires setting up an auth key and adding it to nix-sops
   services.tailscale.enable = false;
 
