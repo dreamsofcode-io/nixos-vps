@@ -1,4 +1,4 @@
-{...}: let
+{lib, ...}: let
   sshKeys = [
   ];
 in {
@@ -13,12 +13,12 @@ in {
   nix.settings.experimental-features = ["nix-command" "flakes"];
 
   # Enable Tailscale. Requires setting up an auth key and adding it to nix-sops
-  services.tailscale.enable = false;
+  services.tailscale.enable = lib.mkDefault false;
 
   # Enable Cloudflared. Please check documentation for how to configure.
   services.cloudflared = {
-    enable = false;
-    tunnelId = "";
+    enable = lib.mkDefault false;
+    tunnelId = lib.mkDefault "";
   };
 
   services.openssh.settings = {
