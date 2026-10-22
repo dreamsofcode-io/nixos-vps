@@ -6,11 +6,16 @@ in {
     ./vps_configuration.nix
     ./secrets.nix
     ./containers.nix
+    ./networking.nix
     ./services/tailscale.nix
     ./services/cloudflared.nix
   ];
 
   nix.settings.experimental-features = ["nix-command" "flakes"];
+
+  # Switch to "tailscale" after confirming access over Tailscale.
+  # Applies to host services; container forwarding is configured separately.
+  custom.networking.access = lib.mkDefault "public";
 
   # Enable Tailscale. Requires setting up an auth key and adding it to nix-sops
   services.tailscale.enable = lib.mkDefault false;
