@@ -12,12 +12,16 @@ bootstrap hostname="vps" target="" key_file="":
 
 # Build on the target VPS and activate it, prompting for sudo authentication.
 [positional-arguments]
-deploy name="vps" target="":
+deploy target="admin@vps" name="vps":
     #!/usr/bin/env bash
     set -euo pipefail
-    name="$1"
-    target="${2:-admin@$name}"
+    target="$1"
+    name="$2"
     [[ "$name" =~ ^[a-zA-Z0-9][a-zA-Z0-9_-]*$ ]] || { echo 'Invalid configuration name' >&2; exit 1; }
+    sudo_options=()
+    if [[ "$target" != root@* ]]; then
+        sudo_options=(--sudo --ask-sudo-password)
+    fi
     exec nix --extra-experimental-features 'nix-command flakes' run --inputs-from . \
         nixpkgs#nixos-rebuild-ng -- switch --flake ".#$name" \
-        --build-host "$target" --target-host "$target" --sudo --ask-sudo-password
+        --build-host "$target" --target-host "$target" "${sudo_options[@]}"
