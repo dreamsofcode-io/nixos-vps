@@ -48,19 +48,18 @@ settings to match your instance before deploying this configuration.
 
 Run the following commands from this repository's directory on your local machine.
 
-Before deploying:
+Edit `settings.nix` before deploying. This is the main place to configure your server:
 
-- Add your public SSH key to `users.users.admin.openssh.authorizedKeys.keys`
-  in your server's entry in `flake.nix`. For example, copy the contents of
+- Add your public SSH key to `sshKeys`. For example, copy the contents of
   `~/.ssh/id_ed25519.pub` into a quoted entry in that list. Use your public
   key (`.pub`), never your private key. The list starts empty; add your key
   before deploying so you can log in as `admin`.
 - Generate an admin password hash with
   `nix run nixpkgs#mkpasswd -- --method=yescrypt` and put the result in
-  `users.users.admin.hashedPassword`. Do not leave it empty. You will use this
+  `hashedPassword`. Do not leave it empty. You will use this
   password for sudo; SSH login uses your key.
-- Set your server's hostname in `flake.nix`. The examples below use `vps`.
-- Keep `custom.networking.access = "public"` until you have confirmed that
+- Set `hostname`. The examples below use `"vps"`.
+- Keep `access = "public"` until you have confirmed that
   Tailscale is connected and you can SSH through it.
 
 ### 3. Bootstrap secrets
@@ -76,7 +75,7 @@ exists on the server; `root` is shown for an initial deployment. If `admin`
 already exists, use `admin@x.x.x.x` instead. Verify the SSH host fingerprint
 when connecting for the first time.
 
-The first argument is the hostname set in `flake.nix`. Bootstrap uses it to
+The first argument is `hostname` from `settings.nix`. Bootstrap uses it to
 name `secrets/vps.json`; it does not evaluate the NixOS configuration.
 
 The command creates or reuses a local age key at
@@ -89,10 +88,11 @@ In the editor, add the entries needed by the services you intend to enable:
 
 - `tailscale-auth-key`: your Tailscale auth key as a JSON string.
 - `cloudflared-<tunnel-uuid>.json`: the tunnel credentials JSON encoded as a
-  JSON string, with `<tunnel-uuid>` matching `services.cloudflared.tunnelId`.
+  JSON string, with `<tunnel-uuid>` matching `cloudflared.tunnelId` in `settings.nix`.
 
-Save and close the editor, then enable the corresponding services in your
-configuration. Stage the encrypted file so the Git-backed flake includes it:
+Save and close the editor, then set `tailscale.enable = true` or
+`cloudflared.enable = true` in `settings.nix` as needed. Stage the encrypted file
+so the Git-backed flake includes it:
 
 ```sh
 git add secrets/vps.json
@@ -109,8 +109,9 @@ Once the server has the `admin` account and your SSH key installed, deploy with:
 just deploy admin@x.x.x.x
 ```
 
-This builds the `vps` configuration on the VPS and activates it. Enter the
-admin account's sudo password when prompted.
+This builds the `vps` flake configuration on the VPS and activates it. The flake
+configuration name stays `vps` even if you change `hostname` in `settings.nix`.
+Enter the admin account's sudo password when prompted.
 
 For the first deployment, if only root access is available, use:
 
@@ -122,7 +123,16 @@ This creates the configured `admin` account and disables future root SSH logins.
 Keep your existing session open and verify that you can connect as `admin`
 before closing it. Subsequent deployments should use `admin@x.x.x.x`.
 
-To deploy another configuration defined in `flake.nix`, pass its name second:
+To add another server, copy `settings.nix` to `hosts/vps2.nix` and customize
+its hostname, SSH keys, password hash, and services. Add this entry to
+`nixosConfigurations` in `flake.nix`:
+
+```nix
+vps2 = mkVps (import ./hosts/vps2.nix) [];
+```
+
+Each server uses `secrets/<hostname>.json`. Bootstrap secrets using that server's
+hostname and SSH address. To deploy it, pass its flake configuration name second:
 
 ```sh
 just deploy admin@x.x.x.x vps2

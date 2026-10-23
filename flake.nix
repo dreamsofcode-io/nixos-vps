@@ -9,26 +9,31 @@
 
   outputs = { nixpkgs, sops-nix, ... }:
   let
-    mkVps = hostname: extraModules: nixpkgs.lib.nixosSystem {
+    mkVps = settings: extraModules: nixpkgs.lib.nixosSystem {
       system = "x86_64-linux";
       modules = [
         sops-nix.nixosModules.sops
-        { networking.hostName = hostname; }
+        ({ lib, ... }: {
+          networking.hostName = lib.mkDefault settings.hostname;
+          users.users.admin = {
+            openssh.authorizedKeys.keys = lib.mkDefault settings.sshKeys;
+            hashedPassword = lib.mkDefault settings.hashedPassword;
+          };
+          custom.networking.access = lib.mkDefault settings.access;
+          services.tailscale.enable = lib.mkDefault settings.tailscale.enable;
+          services.cloudflared = {
+            enable = lib.mkDefault settings.cloudflared.enable;
+            tunnelId = lib.mkDefault settings.cloudflared.tunnelId;
+          };
+        })
         ./configuration.nix
       ] ++ extraModules;
     };
   in {
     nixosConfigurations = {
-      vps = mkVps "vps" [
-        {
-          users.users.admin.openssh.authorizedKeys.keys = [
-            # Add your public SSH key before deploying, for example:
-            # "ssh-ed25519 AAAA... you@your-machine"
-          ];
-        }
-      ];
-      # Add another VPS with optional per-server settings:
-      # vps2 = mkVps "vps2" [ { time.timeZone = "Europe/London"; } ];
+      vps = mkVps (import ./settings.nix) [];
+      # Copy settings.nix to hosts/vps2.nix for another server:
+      # vps2 = mkVps (import ./hosts/vps2.nix) [ { time.timeZone = "Europe/London"; } ];
     };
   };
 }
