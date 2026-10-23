@@ -19,7 +19,14 @@
     };
   in {
     nixosConfigurations = {
-      vps = mkVps "vps" [];
+      vps = mkVps "vps" [
+        {
+          users.users.admin.openssh.authorizedKeys.keys = [
+            # Add your public SSH key before deploying, for example:
+            # "ssh-ed25519 AAAA... you@your-machine"
+          ];
+        }
+      ];
       # Add another VPS with optional per-server settings:
       # vps2 = mkVps "vps2" [ { time.timeZone = "Europe/London"; } ];
     };

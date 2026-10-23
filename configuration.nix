@@ -1,7 +1,4 @@
-{lib, ...}: let
-  sshKeys = [
-  ];
-in {
+{lib, ...}: {
   imports = [
     ./vps_configuration.nix
     ./secrets.nix
@@ -44,7 +41,5 @@ in {
     description = "Admin account for VPS";
     extraGroups = ["wheel"];
     hashedPassword = "";
-
-    openssh.authorizedKeys.keys = sshKeys;
   };
 }
