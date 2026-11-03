@@ -2,7 +2,20 @@
 
 A starting configuration for a NixOS VPS, with optional Tailscale and Cloudflare Tunnel integration.
 
-## Requirements
+## Table of contents
+
+1. [Setup](#setup)
+2. [Deploying a service](#deploying-a-service)
+3. [Managing secrets](#managing-secrets)
+4. [Enabling Tailscale](#enabling-tailscale)
+5. [Cloudflare Tunnel](#cloudflare-tunnel)
+6. [Local building on macOS](#local-building-on-macos)
+7. [Building on a separate machine](#building-on-a-separate-machine)
+8. [Trusted builds](#trusted-builds)
+
+## Setup
+
+### Requirements
 
 On your local machine, you need:
 
@@ -15,8 +28,8 @@ On your local machine, you need:
   you can start a shell containing it by running `nix shell nixpkgs#just`.
   Run the guide's `just` commands from that shell.
 - **Git**, **Bash**, and an **SSH client**, plus SSH access to your VPS.
-- A terminal editor available through `EDITOR` or `SOPS_EDITOR` if you plan
-  to bootstrap secrets, for example `export EDITOR=nano`.
+- A terminal editor available through `EDITOR` or `SOPS_EDITOR` for managing
+  secrets, for example `export EDITOR=nano`.
 
 Check that Nix and just are available:
 
@@ -26,10 +39,12 @@ just --version
 ```
 
 The bootstrap recipe obtains SOPS and the age tools through Nix; you do not
-need to install them separately. Builds run on the VPS, so your local machine
-does not need to build Linux packages itself.
-
-## Instructions
+need to install them separately. Deployment builds through your local Nix
+installation by default. This flake targets `x86_64-linux`: native x86_64 Linux
+can build directly; macOS or ARM Linux needs a suitable Linux VM, emulation,
+or a configured Nix builder. To build on a separate Linux machine instead,
+pass its SSH address as the third deployment argument, such as
+`just deploy admin@vps vps zenbox`. See [Building on a separate machine](#building-on-a-separate-machine).
 
 ### 1. Obtain a NixOS instance
 
@@ -77,7 +92,8 @@ password markers `!`, `!!`, and `*` do not satisfy these requirements.
 
 ### 3. Bootstrap secrets
 
-If you plan to enable Tailscale or Cloudflare Tunnel, run:
+Bootstrap an encrypted secrets file for every VPS before its first deployment,
+even if you are not enabling Tailscale or Cloudflare Tunnel yet:
 
 ```sh
 just bootstrap vps root@x.x.x.x
@@ -97,7 +113,11 @@ reads the VPS's public SSH host key, and opens SOPS in your editor. New secrets
 files are encrypted for both your local age key and the VPS host key. Keep a
 backup of your local private age key outside this repository.
 
-In the editor, add the entries needed by the services you intend to enable:
+New files start as an empty JSON object (`{}`). Leave it empty if you do not
+have secrets to add yet, or add JSON entries for your applications. Close the
+editor to finish; making no changes is valid.
+
+If you are enabling an optional service now, add its credentials too:
 
 - `tailscale-auth-key`: your Tailscale auth key as a JSON string.
 - `cloudflared-<tunnel-uuid>.json`: the tunnel credentials JSON encoded as a
@@ -112,7 +132,8 @@ git add secrets/vps.json
 ```
 
 Running bootstrap again edits the existing file without changing its encryption
-recipients. If both services remain disabled, you can skip secrets bootstrapping.
+recipients. Keep this file as the server's secrets store and add credentials as
+you deploy services; see [Managing secrets](#managing-secrets).
 
 ### 4. Deploy
 
@@ -122,12 +143,15 @@ Once the server has the `admin` account and your SSH key installed, deploy with:
 just deploy admin@x.x.x.x
 ```
 
-This builds the `vps` flake configuration on the VPS and activates it. The recipe
-uses the `ssh-ng` store protocol and remote cache substitution with
-`--use-substitutes` to reduce copying over SSH. It also uses `--no-reexec` so
-macOS does not try to execute the Linux rebuild tool. The flake configuration
-name stays `vps` even if you change `hostname` in `settings.nix`.
-Enter the admin account's sudo password when prompted.
+This builds the `vps` flake configuration through your local Nix installation,
+copies its runtime closure to the VPS, and activates it there with sudo. Enter
+the admin account's sudo password when prompted. The flake configuration name
+stays `vps` even if you change `hostname` in `settings.nix`.
+
+The transfer uses `ssh-ng` and cache substitution to reduce copying over SSH.
+The configuration trusts `admin` to import the selected builder's unsigned
+outputs; see [Trusted builds](#trusted-builds). Activation runs the VPS's own
+`nixos-rebuild` with `--no-reexec` and the already-built system path.
 
 For the first deployment, if only root access is available, use:
 
@@ -175,66 +199,174 @@ just deploy admin@x.x.x.x vps2
 Stage any new Nix modules or encrypted secrets files before deploying. Builds
 include changes to tracked files even when they have not yet been committed.
 
-## Building on a separate machine
+## Deploying a service
 
-The machine running `just` evaluates the configuration; the build host produces
-the Linux system, and the deployment target receives and activates it. By default,
-the VPS is both the build host and deployment target. Your local machine can run
-macOS or have a different CPU architecture because it does not build the system.
+After setup, define services in Nix and run `just deploy` to apply changes.
+The examples below are alternatives: each runs a web server on
+`127.0.0.1:8080`. Choose one, or assign different ports if using both.
 
-To use a faster builder, install Nix with `nix-command` and `flakes` enabled on a
-Linux machine and verify SSH access from your local machine:
+### Docker
 
-```sh
-ssh zenbox 'uname -m; nix --version'
+Replace the contents of `containers.nix` with:
+
+```nix
+{ ... }: {
+  virtualisation.oci-containers = {
+    backend = "docker";
+    containers.web = {
+      image = "nginx:stable";
+      ports = ["127.0.0.1:8080:80"];
+    };
+  };
+}
 ```
 
-This flake targets `x86_64-linux`, so use an x86_64 Linux builder. An ARM Linux
-machine or Mac needs an x86_64 Linux VM or configured emulation to build this
-target; selecting it with `--build-host` does not enable cross-compilation.
+NixOS enables Docker and creates `docker-web.service` to run the container.
+For your own application, replace the image and container port, and add persistent
+volumes if it stores data. You can use `backend = "podman"` instead; its unit is
+named `podman-web.service`.
 
-Pass the builder's SSH address as the third argument, after the deployment target
-and flake configuration name:
+### systemd
 
-```sh
-# Initial deployment: build on zenbox, activate on the VPS.
-just deploy root@x.x.x.x vps zenbox
+For a process running directly on the host, add a service inside the module body
+in `configuration.nix`. Add `pkgs` to that module's arguments:
 
-# Later deployments: use the admin account on the VPS.
-just deploy admin@x.x.x.x vps zenbox
+```nix
+{ config, lib, pkgs, ... }: {
+  # Keep the existing imports and configuration here.
+
+  systemd.services.example-web = {
+    description = "Example web server";
+    wantedBy = ["multi-user.target"];
+    after = ["network.target"];
+    serviceConfig = {
+      ExecStart = "${pkgs.python3}/bin/python -m http.server 8080 --bind 127.0.0.1";
+      DynamicUser = true;
+      StateDirectory = "example-web";
+      WorkingDirectory = "/var/lib/example-web";
+      Restart = "on-failure";
+    };
+  };
+}
 ```
 
-The builder can also be addressed as `user@builder.example.com`. Both hosts must
-be reachable over SSH from your local machine. The builder account needs access
-to its Nix store; the target account needs root access or sudo for activation.
-The recipe uses cache substitution on both hosts and transfers the remaining
-build outputs through your local machine. It does not activate the VPS
-configuration on the builder.
+Replace the example command with your application's executable and arguments.
+Prefer a built-in NixOS service module when your application has one; it usually
+handles users, directories, and service configuration for you.
 
-A separate builder's outputs may require signatures from a key trusted by the
-target's Nix store. For repeated use, configure signing on the builder and add
-its public signing key to the target's `nix.settings.trusted-public-keys`.
-If deployment stops with “lacks a signature by a trusted key”, and you trust the
-authenticated builder, you can instead allow the specific copy once:
+### Apply and inspect changes
+
+Stage any new module files, then deploy using your current SSH address:
 
 ```sh
-# Use the complete /nix/store/...-nixos-system-... path printed by deployment.
-nix copy --no-check-sigs --from ssh-ng://zenbox \
-  --to ssh-ng://root@x.x.x.x /nix/store/SYSTEM_PATH
-just deploy root@x.x.x.x vps zenbox
+just deploy admin@x.x.x.x
+ssh admin@x.x.x.x 'curl http://127.0.0.1:8080'
 ```
 
-This override applies only to that copy. For an admin target, arrange signing
-and trust before deployment, or perform the import through an authorized root
-session. Keep the documented reboot and SSH checks after activation.
+To inspect the Docker example on the VPS:
 
-## Optional services
+```sh
+sudo systemctl status docker-web.service
+sudo journalctl -u docker-web.service -n 50 --no-pager
+```
 
-The examples below assume you have completed the first deployment and can SSH
-as `admin`. Before that deployment, use your provisioned account instead.
-Replace `vps` with your configured hostname when bootstrapping secrets.
+Use `example-web.service` for the systemd example. Both examples listen only on
+localhost. To reach them from your local machine during development:
 
-### Tailscale
+```sh
+ssh -L 8080:127.0.0.1:8080 admin@x.x.x.x
+```
+
+Open `http://127.0.0.1:8080` locally while that connection is open. To publish the
+application, follow [Cloudflare Tunnel](#cloudflare-tunnel).
+
+## Managing secrets
+
+Setup creates `secrets/<hostname>.json`, encrypted for your local age key and the
+VPS's SSH host key. Keep application passwords, API tokens, and service
+credentials here. Nix contains secret names and runtime paths; secret values
+stay in SOPS until they are decrypted on the VPS.
+
+### Add or edit secrets
+
+Reopen the server's secrets file using the same bootstrap command:
+
+```sh
+just bootstrap vps admin@x.x.x.x
+```
+
+Use your configured hostname and current SSH address, including the Tailscale
+address if public access is disabled. Add entries without removing existing
+ones. For example:
+
+```json
+{
+  "api-key": "YOUR_APPLICATION_API_KEY",
+  "app-env": "API_KEY=YOUR_APPLICATION_API_KEY\n"
+}
+```
+
+These illustrate two ways to supply credentials; use the format your application
+expects. SOPS encrypts the values when you save. Only the encrypted file belongs
+in Git; do not put plaintext credentials in Nix files or container `environment`.
+
+### Give a service access to a secret
+
+For an existing systemd service called `my-app`, add this inside the module body
+in `configuration.nix` (which already accepts `config`):
+
+```nix
+sops.secrets.api-key = {
+  restartUnits = ["my-app.service"];
+};
+
+systemd.services.my-app.serviceConfig.LoadCredential =
+  "api-key:${config.sops.secrets.api-key.path}";
+```
+
+SOPS decrypts the value to `/run/secrets/api-key`, readable only by root by
+default. systemd gives the service its own credential file at
+`$CREDENTIALS_DIRECTORY/api-key`. Configure the application to read that file;
+`LoadCredential` does not create an environment variable containing the value.
+The service restarts when the secret changes.
+
+For an existing Docker container called `my-app`, use the `app-env` entry as an
+environment file. Declare it in `configuration.nix`:
+
+```nix
+sops.secrets.app-env = {
+  restartUnits = ["docker-my-app.service"];
+};
+
+virtualisation.oci-containers.containers.my-app.environmentFiles = [
+  config.sops.secrets.app-env.path
+];
+```
+
+The container must already have an image configured in `containers.nix`. Docker
+loads the decrypted file as environment variables when it starts the container.
+For Podman, use `podman-my-app.service` in `restartUnits` instead.
+
+Stage the encrypted file and deploy to apply new declarations or changed values:
+
+```sh
+git add secrets/vps.json
+just deploy admin@x.x.x.x
+```
+
+### Keep access to your secrets
+
+Back up `${XDG_CONFIG_HOME:-~/.config}/sops/age/keys.txt` (or your custom
+`SOPS_AGE_KEY_FILE`) outside the repository. It lets you edit and recover secrets
+if the VPS is lost. An encrypted secrets file alone is not enough to recover them.
+Bootstrap preserves existing encryption recipients; replacing the VPS or changing
+keys requires explicitly updating recipients with SOPS. When rotating a service
+credential, update its value in the editor, save, and deploy again.
+
+## Enabling Tailscale
+
+Tailscale is optional. The examples below assume setup is complete and you can
+SSH as `admin`. Replace `vps` with your configured hostname when editing secrets.
 
 Install Tailscale on your local machine and connect it to your tailnet. Create
 an auth key in the [Tailscale admin console](https://login.tailscale.com/admin/settings/keys).
@@ -294,7 +426,9 @@ name if enabled. This mode closes public host-service ports and trusts the
 Tailscale interface; it does not restrict forwarded container traffic or
 prevent Cloudflare Tunnel from publishing an application.
 
-### Cloudflare Tunnel
+## Cloudflare Tunnel
+
+Cloudflare Tunnel is optional and can be enabled after setup.
 
 This module uses a **locally managed tunnel** with a credentials JSON file,
 not a dashboard-managed tunnel token. You need a domain on Cloudflare. Follow
@@ -362,3 +496,165 @@ To inspect tunnel logs, run this on the VPS with your real UUID:
 ```sh
 sudo journalctl -u cloudflared-tunnel-TUNNEL_UUID.service -n 50 --no-pager
 ```
+
+## Local building on macOS
+
+Nix on macOS cannot natively build the Linux system used by this VPS. You need a
+Linux VM or a separate Linux builder that supports **`x86_64-linux`**. Intel Macs
+can virtualize that architecture directly. Apple Silicon normally runs an
+`aarch64-linux` VM, so it also needs x86_64 emulation or translation; an ARM Linux
+VM alone is not enough.
+
+### Set up a nix-darwin Linux builder
+
+[nix-darwin provides `nix.linux-builder`](https://github.com/nix-darwin/nix-darwin/blob/master/modules/nix/linux-builder.nix)
+to manage a local Linux builder VM and register it with your Mac's Nix daemon.
+This requires an existing nix-darwin setup that manages Nix (`nix.enable = true`);
+follow the [upstream builder prerequisites](https://github.com/NixOS/nixpkgs/blob/master/doc/packages/darwin-builder.section.md).
+
+First, add this to **your Mac's nix-darwin configuration**, keeping the builder's
+default configuration for its initial bootstrap:
+
+```nix
+nix.linux-builder.enable = true;
+```
+
+Apply your Mac's configuration with its usual command, for example:
+
+```sh
+sudo darwin-rebuild switch --flake /path/to/your/mac-config#YOUR_MAC_NAME
+```
+
+On an Intel Mac, the default builder supports `x86_64-linux`. On Apple Silicon,
+get the default ARM Linux builder running first, then add these options to your
+Mac's configuration and apply it again:
+
+```nix
+nix.linux-builder.systems = ["aarch64-linux" "x86_64-linux"];
+nix.linux-builder.config.boot.binfmt.emulatedSystems = ["x86_64-linux"];
+```
+
+This advertises x86_64 support to the Mac's Nix daemon and enables emulation
+inside the Linux VM. Merely adding `x86_64-linux` to the advertised systems does
+not enable emulation. Keep the initial bootstrap separate from this customization
+so the default builder can build the customized VM.
+
+### Verify and deploy
+
+From this repository on your Mac, run a small Linux build that cannot be
+substituted from a cache:
+
+```sh
+nix build --impure --no-link --print-build-logs --expr '
+  let
+    flake = builtins.getFlake (toString ./.);
+    pkgs = flake.inputs.nixpkgs.legacyPackages.x86_64-linux;
+  in pkgs.runCommand "linux-builder-check" { allowSubstitutes = false; }
+    "uname -m | tee $out"
+'
+```
+
+The build log should print `x86_64`. Once that succeeds, use:
+
+```sh
+just deploy admin@x.x.x.x
+```
+
+Leave the builder argument as its default, `local`: your Mac's Nix daemon sends
+Linux derivations to the registered VM and receives the outputs into its local
+store. Deployment then transfers the completed system to the VPS and activates
+it there. Emulated builds may be slower than a native x86_64 Linux builder; you
+can select a separate machine such as `zenbox` using the next section instead.
+
+## Building on a separate machine
+
+By default, `just deploy` builds through your local Nix installation. Local
+builds use the local store and any builders configured with Nix. The build must
+support this flake's `x86_64-linux` target. A native x86_64 Linux machine can build
+directly; macOS or ARM Linux needs a compatible Linux VM, configured builder,
+or emulation. Deployment does not automatically configure cross-compilation or
+fall back to the VPS when local building is unavailable.
+
+To select a separate builder, install Nix with `nix-command` and `flakes` enabled
+on an x86_64 Linux machine and verify SSH access from your local machine:
+
+```sh
+ssh zenbox 'uname -m; nix --version'
+```
+
+Pass its SSH address as the third argument, after the deployment target and
+flake configuration name:
+
+```sh
+# Build on zenbox for the first deployment.
+just deploy root@x.x.x.x vps zenbox
+
+# Build on zenbox for later deployments.
+just deploy admin@x.x.x.x vps zenbox
+
+# Explicitly choose local building (the default).
+just deploy admin@x.x.x.x vps local
+```
+
+The builder can be `user@builder.example.com` or an `ssh-ng://` store URL.
+The builder account needs access to its Nix store and permission to accept the
+build inputs. Nix's remote-store permission errors must be resolved on that
+builder before it can be used. Both the builder and the VPS must be reachable
+from your local machine.
+
+With an explicit remote builder, intermediate outputs stay on that builder.
+Only the completed system's runtime closure is streamed through your local
+machine to the VPS. Cache substitution reduces the paths transferred, and no
+local Linux build is required.
+
+For recovery or a one-time trust bootstrap on an existing VPS, you can explicitly
+build on the deployment target:
+
+```sh
+just deploy admin@x.x.x.x vps target
+```
+
+This is an opt-in fallback; normal local and separate-builder deployments do not
+build on the VPS. Reboot and check SSH access after kernel changes as described
+in [Setup](#setup).
+
+## Trusted builds
+
+This configuration adds `admin` to `nix.settings.trusted-users`, alongside
+`root`. Deployment can therefore import the selected builder's unsigned outputs
+as `admin`, then use sudo for activation. There is no signing-key setup.
+
+**A trusted Nix user has root-equivalent privileges without a sudo password.**
+Use this account only for server administration, and select only builders you
+trust to produce the server's system. SSH authenticates the connection and
+protects the transfer; it does not verify whether a build is safe to run.
+
+The copy command uses `--no-check-sigs` for that deployment only. Global
+signature checking remains enabled for normal Nix operations. This setting
+does not change SSH authentication or grant other users Nix trust.
+
+### Initial and existing VPS instances
+
+For the first deployment, use the provisioned `root` account, which Nix already
+trusts:
+
+```sh
+just deploy root@x.x.x.x
+# Or, from macOS or another machine without a configured Linux builder:
+just deploy root@x.x.x.x vps zenbox
+```
+
+That deployment creates `admin` and installs its Nix trust configuration.
+Subsequent local or separate-builder deployments can use `admin`.
+
+If an existing VPS predates this change and root SSH is already disabled, apply
+this configuration once with the explicit on-target fallback:
+
+```sh
+just deploy admin@x.x.x.x vps target
+```
+
+The system is built on the target, so no unsigned runtime outputs need to be
+imported before trust is installed. Afterward, return to your local machine or
+separate builder for builds. Signing keys can be added later if you need a
+workflow that keeps the deployment account outside `trusted-users`.
