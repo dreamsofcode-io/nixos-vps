@@ -1,11 +1,8 @@
 {config, lib, ...}: {
   imports = [
     ./vps_configuration.nix
-    ./secrets.nix
-    ./containers.nix
-    ./networking.nix
-    ./services/tailscale.nix
-    ./services/cloudflared.nix
+    ./modules
+    ./services
   ];
 
   nix.settings.experimental-features = ["nix-command" "flakes"];

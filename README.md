@@ -369,22 +369,33 @@ Here is where each part belongs:
 | --- | --- |
 | `settings.nix` | Hostname, admin access, and optional-service switches |
 | `configuration.nix` | Imports modules and configures the base system |
-| `containers.nix` | Docker or Podman container definitions; already imported |
-| `services/` | Application and optional-service NixOS modules |
+| `modules/containers.nix` | Docker or Podman container definitions; already imported |
+| `services/` | Automatically imported application and optional-service modules |
+| `modules/` | Automatically imported base-system modules |
 | `secrets/<hostname>.json` | Encrypted application and service credentials |
 
-`services/` already contains the Tailscale and Cloudflare modules. Put additional
-service modules here and import them in `configuration.nix`; creating a file
-alone does not enable a service. Container definitions can also live in these
-modules if you prefer one file per application. The Docker example below uses
-the existing `containers.nix`; the systemd example adds a module in `services/`.
+`configuration.nix` imports `services/` and `modules/` through their
+`default.nix` files. They automatically discover sibling `.nix` files and
+subdirectories containing a `default.nix`, in filename order. Each directory's
+own `default.nix` is excluded from discovery.
+
+Put application modules in `services/` and shared system modules in `modules/`.
+New modules must be staged in Git before deployment; no imports-list edit is
+needed. Every discovered module is evaluated, so optional services should use
+an enable option to control whether they run. To keep a file out of discovery,
+move it outside these directories or use a non-`.nix` extension.
+
+`services/` already contains the Tailscale and Cloudflare modules. Container
+definitions can also live here if you prefer one file per application. The
+Docker example below uses the existing `modules/containers.nix`; the systemd
+example adds a module in `services/`.
 
 The examples below are alternatives: each runs a web server on
 `127.0.0.1:8080`. Choose one, or assign different ports if using both.
 
 ### Docker
 
-Replace the contents of `containers.nix` with:
+Replace the contents of `modules/containers.nix` with:
 
 ```nix
 { ... }: {
@@ -429,14 +440,8 @@ For a process running directly on the host, create `services/example-web.nix`:
 }
 ```
 
-Add this entry inside the existing `imports` list in `configuration.nix`,
-keeping its other entries:
-
-```nix
-./services/example-web.nix
-```
-
-Stage the new file so the Git-backed flake can include it:
+The module is discovered automatically. Stage the new file so the Git-backed
+flake can include it:
 
 ```sh
 git add services/example-web.nix
@@ -445,12 +450,12 @@ git add services/example-web.nix
 Replace the example command with your application's executable and arguments.
 Prefer a built-in NixOS service module when your application has one; it usually
 handles users, directories, and service configuration for you. Those options
-can also live in an imported module under `services/`.
+can also live in an automatically discovered module under `services/`.
 
 ### Apply and inspect changes
 
-After editing the container definition or staging and importing your systemd
-module, deploy from your local machine:
+After editing the container definition or staging your new service module,
+deploy from your local machine:
 
 ```sh
 just deploy admin@x.x.x.x
@@ -495,9 +500,11 @@ To update a container, change its image tag or digest and deploy again. To updat
 a host service, change its module or package input and deploy again. Editing
 files locally does not change the running VPS until you deploy.
 
-To remove a container, remove its definition from `containers.nix`. To remove a
-host service, remove its module from the imports list. Deploy again to stop and
-remove the service; persistent application data is retained.
+To remove a container, remove its definition from `modules/containers.nix`. To
+remove an application module, delete its file from `services/` and stage the
+deletion. Deploy again to stop and remove the service. Existing data is governed
+by its storage configuration; container volumes and systemd state directories
+are not deleted by removing the module.
 
 ## Managing secrets
 
@@ -562,7 +569,7 @@ virtualisation.oci-containers.containers.my-app.environmentFiles = [
 ];
 ```
 
-The container must already have an image configured in `containers.nix`. Docker
+The container must already have an image configured in `modules/containers.nix`. Docker
 loads the decrypted file as environment variables when it starts the container.
 For Podman, use `podman-my-app.service` in `restartUnits` instead.
 
