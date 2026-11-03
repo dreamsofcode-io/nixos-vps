@@ -130,6 +130,24 @@ This creates the configured `admin` account and disables future root SSH logins.
 Keep your existing session open and verify that you can connect as `admin`
 before closing it. Subsequent deployments should use `admin@x.x.x.x`.
 
+After the first deployment, reboot the VPS to boot into the newly installed
+kernel. Deployment activates the configuration, but the running kernel does
+not change until a reboot. Once you have verified SSH access as `admin`, run:
+
+```sh
+ssh -t admin@x.x.x.x 'sudo reboot'
+```
+
+The SSH connection will close. Wait for the instance to restart, then reconnect:
+
+```sh
+ssh admin@x.x.x.x
+uname -r
+```
+
+Use the Tailscale address instead if public SSH access is disabled. Reboot
+after future kernel updates as well to start using the updated kernel.
+
 To add another server, copy `settings.nix` to `hosts/vps2.nix` and customize
 its hostname, SSH keys, password hash, and services. Add this entry to
 `nixosConfigurations` in `flake.nix`:
