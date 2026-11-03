@@ -23,5 +23,5 @@ deploy target="admin@vps" name="vps":
         sudo_options=(--sudo --ask-sudo-password)
     fi
     exec nix --extra-experimental-features 'nix-command flakes' run --inputs-from . \
-        nixpkgs#nixos-rebuild-ng -- switch --flake ".#$name" \
-        --build-host "$target" --target-host "$target" "${sudo_options[@]}"
+        nixpkgs#nixos-rebuild-ng -- switch --flake ".#$name" --use-substitutes --no-reexec \
+        --build-host "ssh-ng://$target" --target-host "ssh-ng://$target" "${sudo_options[@]}"

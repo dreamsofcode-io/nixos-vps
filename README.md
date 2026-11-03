@@ -116,8 +116,11 @@ Once the server has the `admin` account and your SSH key installed, deploy with:
 just deploy admin@x.x.x.x
 ```
 
-This builds the `vps` flake configuration on the VPS and activates it. The flake
-configuration name stays `vps` even if you change `hostname` in `settings.nix`.
+This builds the `vps` flake configuration on the VPS and activates it. The recipe
+uses the `ssh-ng` store protocol and remote cache substitution with
+`--use-substitutes` to reduce copying over SSH. It also uses `--no-reexec` so
+macOS does not try to execute the Linux rebuild tool. The flake configuration
+name stays `vps` even if you change `hostname` in `settings.nix`.
 Enter the admin account's sudo password when prompted.
 
 For the first deployment, if only root access is available, use:
