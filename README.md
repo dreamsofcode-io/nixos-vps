@@ -69,6 +69,10 @@ Edit `settings.nix` before deploying. This is the main place to configure your s
 - Keep `access = "public"` until you have confirmed that
   Tailscale is connected and you can SSH through it.
 
+The build fails unless the admin account has both a non-empty password hash and
+at least one non-empty SSH public key. Whitespace-only values and the locked
+password markers `!`, `!!`, and `*` do not satisfy these requirements.
+
 ### 3. Bootstrap secrets
 
 If you plan to enable Tailscale or Cloudflare Tunnel, run:

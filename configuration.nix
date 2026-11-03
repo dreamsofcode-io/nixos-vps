@@ -1,4 +1,4 @@
-{...}: {
+{config, lib, ...}: {
   imports = [
     ./vps_configuration.nix
     ./secrets.nix
@@ -9,6 +9,21 @@
   ];
 
   nix.settings.experimental-features = ["nix-command" "flakes"];
+
+  assertions = [
+    {
+      assertion = let hash = config.users.users.admin.hashedPassword;
+        in hash != null && builtins.match ".*[^[:space:]].*" hash != null
+          && !(builtins.elem hash ["!" "!!" "*"]);
+      message = "Set a non-empty admin password hash in settings.nix (hashedPassword) before deploying.";
+    }
+    {
+      assertion = lib.any
+        (key: builtins.match ".*[^[:space:]].*" key != null)
+        config.users.users.admin.openssh.authorizedKeys.keys;
+      message = "Set at least one non-empty admin SSH public key in settings.nix (sshKeys) before deploying.";
+    }
+  ];
 
   services.openssh.settings = {
     PermitRootLogin = "no";
