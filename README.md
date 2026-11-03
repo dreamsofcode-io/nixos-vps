@@ -4,14 +4,119 @@ A starting configuration for a NixOS VPS, with optional Tailscale and Cloudflare
 
 ## Table of contents
 
-1. [Setup](#setup)
-2. [Deploying a service](#deploying-a-service)
-3. [Managing secrets](#managing-secrets)
-4. [Enabling Tailscale](#enabling-tailscale)
-5. [Cloudflare Tunnel](#cloudflare-tunnel)
-6. [Local building on macOS](#local-building-on-macos)
-7. [Building on a separate machine](#building-on-a-separate-machine)
-8. [Trusted builds](#trusted-builds)
+1. [Quick start](#quick-start)
+2. [Setup](#setup)
+3. [Deploying a service](#deploying-a-service)
+4. [Managing secrets](#managing-secrets)
+5. [Enabling Tailscale](#enabling-tailscale)
+6. [Cloudflare Tunnel](#cloudflare-tunnel)
+7. [Local building on macOS](#local-building-on-macos)
+8. [Building on a separate machine](#building-on-a-separate-machine)
+9. [Trusted builds](#trusted-builds)
+
+## Quick start
+
+This assumes a provisioned **x86_64 NixOS VPS matching the Hostinger template**,
+root SSH access, and [Nix, Git, Bash, and an editor](#requirements) on your local
+machine. Replace `x.x.x.x` with the VPS's public IP address. Run these commands
+locally from the repository directory.
+
+### 1. Clone and prepare your tools
+
+```sh
+git clone https://github.com/dreamsofcode-io/nixos-vps.git
+cd nixos-vps
+```
+
+Start a shell containing just, and use it for the remaining commands:
+
+```sh
+nix shell nixpkgs#just
+```
+
+Select an editor installed on your machine:
+
+```sh
+export EDITOR=nano
+```
+
+Check root access and verify the host
+fingerprint against your provider's console:
+
+```sh
+ssh root@x.x.x.x true
+```
+
+### 2. Set your admin credentials
+
+Generate a password hash, then edit the settings:
+
+```sh
+nix run nixpkgs#mkpasswd -- --method=yescrypt
+"$EDITOR" settings.nix
+```
+
+Add your SSH **public** key to `sshKeys` and paste the generated hash into
+`hashedPassword`. Keep `hostname` as `vps`, public access enabled, and both
+optional services disabled for this first deployment. Remember the password:
+it is used for sudo. See [Prepare your configuration](#2-prepare-your-configuration).
+
+### 3. Create the encrypted secrets store
+
+```sh
+just bootstrap vps root@x.x.x.x
+git add secrets/vps.json
+```
+
+Close the editor with the empty JSON object if you have no secrets yet. Back up
+the local age key outside the repository as described in [Bootstrap secrets](#3-bootstrap-secrets).
+
+### 4. Choose a builder and deploy
+
+Keep a root SSH session open in another terminal until you have verified the
+new admin login. The first deployment disables new root SSH logins and creates
+the configured admin account.
+
+For native x86_64 Linux, or a local Nix installation with a configured
+`x86_64-linux` builder:
+
+```sh
+just deploy root@x.x.x.x
+```
+
+For macOS or ARM Linux without a configured Linux builder, use a separate
+x86_64 Linux machine with Nix and SSH access. Replace `zenbox` with that
+machine's SSH address:
+
+```sh
+just deploy root@x.x.x.x vps zenbox
+```
+
+You can instead set up a [local macOS Linux VM](#local-building-on-macos).
+
+### 5. Verify admin access and reboot
+
+```sh
+ssh admin@x.x.x.x 'whoami; hostname'
+```
+
+The command should print `admin` and `vps`. Once that succeeds, reboot:
+
+```sh
+ssh -t admin@x.x.x.x 'sudo reboot'
+```
+
+Once the VPS restarts, reconnect and check it:
+
+```sh
+ssh admin@x.x.x.x 'uname -r; systemctl --failed --no-pager'
+```
+
+Setup is complete when admin SSH works and no failed units are listed.
+Continue with [Deploying a service](#deploying-a-service) for Docker or systemd
+examples, or [Managing secrets](#managing-secrets) for application credentials.
+For later deployments, use `admin` and keep the third builder argument if you
+selected a separate machine.
 
 ## Setup
 
@@ -165,31 +270,41 @@ you deploy services; see [Managing secrets](#managing-secrets).
 
 ### 4. Deploy
 
-Once the server has the `admin` account and your SSH key installed, deploy with:
-
-```sh
-just deploy admin@x.x.x.x
-```
-
-This builds the `vps` flake configuration through your local Nix installation,
-copies its runtime closure to the VPS, and activates it there with sudo. Enter
-the admin account's sudo password when prompted. The flake configuration name
-stays `vps` even if you change `hostname` in `settings.nix`.
-
-The transfer uses `ssh-ng` and cache substitution to reduce copying over SSH.
-The configuration trusts `admin` to import the selected builder's unsigned
-outputs; see [Trusted builds](#trusted-builds). Activation runs the VPS's own
-`nixos-rebuild` with `--no-reexec` and the already-built system path.
-
-For the first deployment, if only root access is available, use:
+For the first deployment, use the provisioned root account:
 
 ```sh
 just deploy root@x.x.x.x
 ```
 
-This creates the configured `admin` account and disables future root SSH logins.
-Keep your existing session open and verify that you can connect as `admin`
-before closing it. Subsequent deployments should use `admin@x.x.x.x`.
+If using a separate builder, pass its address as the third argument:
+
+```sh
+just deploy root@x.x.x.x vps zenbox
+```
+
+This builds the `vps` flake configuration, copies its runtime closure to the
+VPS, and activates it there. Local building is the default. Keep the builder
+argument on every deployment if you selected a separate machine. The flake
+configuration name stays `vps` even if you change `hostname` in `settings.nix`.
+
+The first deployment creates `admin` and disables new root SSH logins. Keep an
+existing root session open in another terminal and verify the new account:
+
+```sh
+ssh admin@x.x.x.x 'whoami; hostname'
+```
+
+Once admin access works, use it for subsequent deployments:
+
+```sh
+just deploy admin@x.x.x.x
+```
+
+Activation prompts for the admin sudo password. The transfer uses `ssh-ng` and
+cache substitution to reduce copying over SSH. The configuration trusts `admin`
+to import the selected builder's unsigned outputs; see [Trusted builds](#trusted-builds).
+Activation runs the VPS's own `nixos-rebuild` with `--no-reexec` and the already-built
+system path.
 
 After the first deployment, reboot the VPS to boot into the newly installed
 kernel. Deployment activates the configuration, but the running kernel does
@@ -202,26 +317,44 @@ ssh -t admin@x.x.x.x 'sudo reboot'
 The SSH connection will close. Wait for the instance to restart, then reconnect:
 
 ```sh
-ssh admin@x.x.x.x
-uname -r
+ssh admin@x.x.x.x 'uname -r; systemctl --failed --no-pager'
 ```
 
 Use the Tailscale address instead if public SSH access is disabled. Reboot
 after future kernel updates as well to start using the updated kernel.
 
-To add another server, copy `settings.nix` to `hosts/vps2.nix` and customize
-its hostname, SSH keys, password hash, and services. Add this entry to
+### Adding another server
+
+Create a separate settings file:
+
+```sh
+mkdir -p hosts
+cp settings.nix hosts/vps2.nix
+```
+
+Edit `hosts/vps2.nix` and set its hostname to `vps2`. Customize the SSH keys,
+password hash, and services for that server. Add this entry to
 `nixosConfigurations` in `flake.nix`:
 
 ```nix
 vps2 = mkVps (import ./hosts/vps2.nix) [];
 ```
 
-Each server uses `secrets/<hostname>.json`. Bootstrap secrets using that server's
-hostname and SSH address. To deploy it, pass its flake configuration name second:
+Bootstrap the new server's secrets, stage both new files, and deploy using its
+provisioned account:
 
 ```sh
-just deploy admin@x.x.x.x vps2
+just bootstrap vps2 root@NEW_VPS_IP
+git add hosts/vps2.nix secrets/vps2.json
+just deploy root@NEW_VPS_IP vps2
+```
+
+Replace `NEW_VPS_IP` with the new server's IP, and include your builder as the
+third deployment argument if needed. Verify admin access and reboot as in the
+first-server instructions. Subsequent deployments use:
+
+```sh
+just deploy admin@NEW_VPS_IP vps2
 ```
 
 Stage any new Nix modules or encrypted secrets files before deploying. Builds
@@ -230,6 +363,22 @@ include changes to tracked files even when they have not yet been committed.
 ## Deploying a service
 
 After setup, define services in Nix and use the deployment recipe to apply changes.
+Here is where each part belongs:
+
+| Path | Purpose |
+| --- | --- |
+| `settings.nix` | Hostname, admin access, and optional-service switches |
+| `configuration.nix` | Imports modules and configures the base system |
+| `containers.nix` | Docker or Podman container definitions; already imported |
+| `services/` | Application and optional-service NixOS modules |
+| `secrets/<hostname>.json` | Encrypted application and service credentials |
+
+`services/` already contains the Tailscale and Cloudflare modules. Put additional
+service modules here and import them in `configuration.nix`; creating a file
+alone does not enable a service. Container definitions can also live in these
+modules if you prefer one file per application. The Docker example below uses
+the existing `containers.nix`; the systemd example adds a module in `services/`.
+
 The examples below are alternatives: each runs a web server on
 `127.0.0.1:8080`. Choose one, or assign different ports if using both.
 
@@ -261,13 +410,10 @@ Its unit is named `podman-web.service`.
 
 ### systemd
 
-For a process running directly on the host, add a service inside the module body
-in `configuration.nix`. Add `pkgs` to that module's arguments:
+For a process running directly on the host, create `services/example-web.nix`:
 
 ```nix
-{ config, lib, pkgs, ... }: {
-  # Keep the existing imports and configuration here.
-
+{ pkgs, ... }: {
   systemd.services.example-web = {
     description = "Example web server";
     wantedBy = ["multi-user.target"];
@@ -283,18 +429,47 @@ in `configuration.nix`. Add `pkgs` to that module's arguments:
 }
 ```
 
+Add this entry inside the existing `imports` list in `configuration.nix`,
+keeping its other entries:
+
+```nix
+./services/example-web.nix
+```
+
+Stage the new file so the Git-backed flake can include it:
+
+```sh
+git add services/example-web.nix
+```
+
 Replace the example command with your application's executable and arguments.
 Prefer a built-in NixOS service module when your application has one; it usually
-handles users, directories, and service configuration for you.
+handles users, directories, and service configuration for you. Those options
+can also live in an imported module under `services/`.
 
 ### Apply and inspect changes
 
-Stage any new module files, then deploy using your current SSH address:
+After editing the container definition or staging and importing your systemd
+module, deploy from your local machine:
 
 ```sh
 just deploy admin@x.x.x.x
+```
+
+If you selected a separate builder during setup, use this instead:
+
+```sh
+just deploy admin@x.x.x.x vps zenbox
+```
+
+After deployment, test the server:
+
+```sh
 ssh admin@x.x.x.x 'curl http://127.0.0.1:8080'
 ```
+
+The Docker example returns the nginx welcome page; the systemd example returns
+a directory listing. Both should return an HTTP response.
 
 To inspect the Docker example on the VPS:
 
@@ -311,7 +486,18 @@ ssh -L 8080:127.0.0.1:8080 admin@x.x.x.x
 ```
 
 Open `http://127.0.0.1:8080` locally while that connection is open. To publish the
-application, follow [Cloudflare Tunnel](#cloudflare-tunnel).
+application, follow [Cloudflare Tunnel](#cloudflare-tunnel). Add application
+credentials using [Managing secrets](#managing-secrets).
+
+### Update or remove a service
+
+To update a container, change its image tag or digest and deploy again. To update
+a host service, change its module or package input and deploy again. Editing
+files locally does not change the running VPS until you deploy.
+
+To remove a container, remove its definition from `containers.nix`. To remove a
+host service, remove its module from the imports list. Deploy again to stop and
+remove the service; persistent application data is retained.
 
 ## Managing secrets
 
