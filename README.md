@@ -169,6 +169,59 @@ just deploy admin@x.x.x.x vps2
 Stage any new Nix modules or encrypted secrets files before deploying. Builds
 include changes to tracked files even when they have not yet been committed.
 
+## Building on a separate machine
+
+The machine running `just` evaluates the configuration; the build host produces
+the Linux system, and the deployment target receives and activates it. By default,
+the VPS is both the build host and deployment target. Your local machine can run
+macOS or have a different CPU architecture because it does not build the system.
+
+To use a faster builder, install Nix with `nix-command` and `flakes` enabled on a
+Linux machine and verify SSH access from your local machine:
+
+```sh
+ssh zenbox 'uname -m; nix --version'
+```
+
+This flake targets `x86_64-linux`, so use an x86_64 Linux builder. An ARM Linux
+machine or Mac needs an x86_64 Linux VM or configured emulation to build this
+target; selecting it with `--build-host` does not enable cross-compilation.
+
+Pass the builder's SSH address as the third argument, after the deployment target
+and flake configuration name:
+
+```sh
+# Initial deployment: build on zenbox, activate on the VPS.
+just deploy root@x.x.x.x vps zenbox
+
+# Later deployments: use the admin account on the VPS.
+just deploy admin@x.x.x.x vps zenbox
+```
+
+The builder can also be addressed as `user@builder.example.com`. Both hosts must
+be reachable over SSH from your local machine. The builder account needs access
+to its Nix store; the target account needs root access or sudo for activation.
+The recipe uses cache substitution on both hosts and transfers the remaining
+build outputs through your local machine. It does not activate the VPS
+configuration on the builder.
+
+A separate builder's outputs may require signatures from a key trusted by the
+target's Nix store. For repeated use, configure signing on the builder and add
+its public signing key to the target's `nix.settings.trusted-public-keys`.
+If deployment stops with “lacks a signature by a trusted key”, and you trust the
+authenticated builder, you can instead allow the specific copy once:
+
+```sh
+# Use the complete /nix/store/...-nixos-system-... path printed by deployment.
+nix copy --no-check-sigs --from ssh-ng://zenbox \
+  --to ssh-ng://root@x.x.x.x /nix/store/SYSTEM_PATH
+just deploy root@x.x.x.x vps zenbox
+```
+
+This override applies only to that copy. For an admin target, arrange signing
+and trust before deployment, or perform the import through an authorized root
+session. Keep the documented reboot and SSH checks after activation.
+
 ## Optional services
 
 The examples below assume you have completed the first deployment and can SSH
