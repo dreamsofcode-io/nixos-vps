@@ -25,11 +25,20 @@ On your local machine, you need:
   [Lix installation instructions](https://lix.systems/install/). Lix provides
   the `nix` command used throughout this guide.
 - **just**, to run the bootstrap and deployment recipes. With Nix installed,
-  you can start a shell containing it by running `nix shell nixpkgs#just`.
-  Run the guide's `just` commands from that shell.
+  start a shell containing it:
+
+  ```sh
+  nix shell nixpkgs#just
+  ```
+
+  Run the guide's commands from that shell.
 - **Git**, **Bash**, and an **SSH client**, plus SSH access to your VPS.
 - A terminal editor available through `EDITOR` or `SOPS_EDITOR` for managing
-  secrets, for example `export EDITOR=nano`.
+  secrets. For example:
+
+  ```sh
+  export EDITOR=nano
+  ```
 
 Check that Nix and just are available:
 
@@ -43,8 +52,13 @@ need to install them separately. Deployment builds through your local Nix
 installation by default. This flake targets `x86_64-linux`: native x86_64 Linux
 can build directly; macOS or ARM Linux needs a suitable Linux VM, emulation,
 or a configured Nix builder. To build on a separate Linux machine instead,
-pass its SSH address as the third deployment argument, such as
-`just deploy admin@vps vps zenbox`. See [Building on a separate machine](#building-on-a-separate-machine).
+pass its SSH address as the third deployment argument:
+
+```sh
+just deploy admin@vps vps zenbox
+```
+
+See [Building on a separate machine](#building-on-a-separate-machine).
 
 ### 1. Obtain a NixOS instance
 
@@ -78,13 +92,21 @@ Edit `settings.nix` before deploying. This is the main place to configure your s
   `~/.ssh/id_ed25519.pub` into a quoted entry in that list. Use your public
   key (`.pub`), never your private key. The list starts empty; add your key
   before deploying so you can log in as `admin`.
-- Generate an admin password hash with
-  `nix run nixpkgs#mkpasswd -- --method=yescrypt` and put the result in
-  `hashedPassword`. Do not leave it empty. You will use this
+- Generate an admin password hash:
+
+  ```sh
+  nix run nixpkgs#mkpasswd -- --method=yescrypt
+  ```
+
+  Put the result in `hashedPassword`. Do not leave it empty. You will use this
   password for sudo; SSH login uses your key.
 - Set `hostname`. The examples below use `"vps"`.
-- Keep `access = "public"` until you have confirmed that
-  Tailscale is connected and you can SSH through it.
+- Keep public access until you have confirmed that Tailscale is connected and
+  you can SSH through it:
+
+  ```nix
+  access = "public";
+  ```
 
 The build fails unless the admin account has both a non-empty password hash and
 at least one non-empty SSH public key. Whitespace-only values and the locked
@@ -113,9 +135,14 @@ reads the VPS's public SSH host key, and opens SOPS in your editor. New secrets
 files are encrypted for both your local age key and the VPS host key. Keep a
 backup of your local private age key outside this repository.
 
-New files start as an empty JSON object (`{}`). Leave it empty if you do not
-have secrets to add yet, or add JSON entries for your applications. Close the
-editor to finish; making no changes is valid.
+New files start as an empty JSON object:
+
+```json
+{}
+```
+
+Leave it empty if you do not have secrets to add yet, or add JSON entries for
+your applications. Close the editor to finish; making no changes is valid.
 
 If you are enabling an optional service now, add its credentials too:
 
@@ -123,9 +150,10 @@ If you are enabling an optional service now, add its credentials too:
 - `cloudflared-<tunnel-uuid>.json`: the tunnel credentials JSON encoded as a
   JSON string, with `<tunnel-uuid>` matching `cloudflared.tunnelId` in `settings.nix`.
 
-Save and close the editor, then set `tailscale.enable = true` or
-`cloudflared.enable = true` in `settings.nix` as needed. Stage the encrypted file
-so the Git-backed flake includes it:
+Save and close the editor. Enable optional services using the
+[Tailscale](#enabling-tailscale) or [Cloudflare Tunnel](#cloudflare-tunnel)
+instructions when needed. Stage the encrypted file so the Git-backed flake
+includes it:
 
 ```sh
 git add secrets/vps.json
@@ -201,7 +229,7 @@ include changes to tracked files even when they have not yet been committed.
 
 ## Deploying a service
 
-After setup, define services in Nix and run `just deploy` to apply changes.
+After setup, define services in Nix and use the deployment recipe to apply changes.
 The examples below are alternatives: each runs a web server on
 `127.0.0.1:8080`. Choose one, or assign different ports if using both.
 
@@ -223,8 +251,13 @@ Replace the contents of `containers.nix` with:
 
 NixOS enables Docker and creates `docker-web.service` to run the container.
 For your own application, replace the image and container port, and add persistent
-volumes if it stores data. You can use `backend = "podman"` instead; its unit is
-named `podman-web.service`.
+volumes if it stores data. To use Podman instead, change the backend:
+
+```nix
+virtualisation.oci-containers.backend = "podman";
+```
+
+Its unit is named `podman-web.service`.
 
 ### systemd
 
@@ -413,8 +446,13 @@ ssh admin@100.x.y.z
 This uses ordinary OpenSSH over Tailscale and the public key in `settings.nix`;
 it does not enable Tailscale SSH. Your tailnet policy must allow the connection.
 
-After this works, you can change `access = "tailscale"` and deploy through the
-Tailscale IP:
+After this works, restrict access in `settings.nix`:
+
+```nix
+access = "tailscale";
+```
+
+Deploy through the Tailscale IP:
 
 ```sh
 just deploy admin@100.x.y.z
@@ -448,8 +486,14 @@ Encode that file as a JSON string for SOPS (replace the example path):
 jq -Rs . "$HOME/.cloudflared/TUNNEL_UUID.json"
 ```
 
-Run `just bootstrap vps admin@x.x.x.x` and add a top-level entry named
-`cloudflared-TUNNEL_UUID.json`, replacing `TUNNEL_UUID` with the real UUID.
+Open your encrypted secrets file:
+
+```sh
+just bootstrap vps admin@x.x.x.x
+```
+
+Add a top-level entry named `cloudflared-TUNNEL_UUID.json`, replacing
+`TUNNEL_UUID` with the real UUID.
 Paste the entire quoted output from `jq` as its value. Preserve existing
 entries. Only the SOPS-encrypted file belongs in Git; keep the original tunnel
 credentials and account certificate outside the repository.
@@ -509,7 +553,7 @@ VM alone is not enough.
 
 [nix-darwin provides `nix.linux-builder`](https://github.com/nix-darwin/nix-darwin/blob/master/modules/nix/linux-builder.nix)
 to manage a local Linux builder VM and register it with your Mac's Nix daemon.
-This requires an existing nix-darwin setup that manages Nix (`nix.enable = true`);
+This requires an existing nix-darwin setup that manages the Nix installation;
 follow the [upstream builder prerequisites](https://github.com/NixOS/nixpkgs/blob/master/doc/packages/darwin-builder.section.md).
 
 First, add this to **your Mac's nix-darwin configuration**, keeping the builder's
@@ -568,7 +612,7 @@ can select a separate machine such as `zenbox` using the next section instead.
 
 ## Building on a separate machine
 
-By default, `just deploy` builds through your local Nix installation. Local
+By default, deployment builds through your local Nix installation. Local
 builds use the local store and any builders configured with Nix. The build must
 support this flake's `x86_64-linux` target. A native x86_64 Linux machine can build
 directly; macOS or ARM Linux needs a compatible Linux VM, configured builder,
