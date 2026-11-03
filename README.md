@@ -37,6 +37,8 @@ You need a VPS running NixOS. For the Hostinger VPS used in the video, visit
 [hostinger.com/dreamsofcode](https://hostinger.com/dreamsofcode) and select NixOS
 as the operating system when provisioning your server.
 
+Use coupon code `DREAMSOFCODE` at checkout for 10% off.
+
 Once the server is ready, note its public IP address and confirm that you can
 connect using the SSH credentials configured during provisioning.
 
