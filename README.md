@@ -46,7 +46,14 @@ settings to match your instance before deploying this configuration.
 
 ### 2. Prepare your configuration
 
-Run the following commands from this repository's directory on your local machine.
+Clone the repository on your local machine:
+
+```sh
+git clone https://github.com/dreamsofcode-io/nixos-vps.git
+cd nixos-vps
+```
+
+Run the remaining commands from this directory unless noted otherwise.
 
 Edit `settings.nix` before deploying. This is the main place to configure your server:
 
@@ -140,3 +147,138 @@ just deploy admin@x.x.x.x vps2
 
 Stage any new Nix modules or encrypted secrets files before deploying. Builds
 include changes to tracked files even when they have not yet been committed.
+
+## Optional services
+
+The examples below assume you have completed the first deployment and can SSH
+as `admin`. Before that deployment, use your provisioned account instead.
+Replace `vps` with your configured hostname when bootstrapping secrets.
+
+### Tailscale
+
+Install Tailscale on your local machine and connect it to your tailnet. Create
+an auth key in the [Tailscale admin console](https://login.tailscale.com/admin/settings/keys).
+For one persistent VPS, use a non-ephemeral, single-use key. See
+[Tailscale's auth key documentation](https://tailscale.com/docs/features/access-control/auth-keys)
+for key options and device approval requirements.
+
+Open your encrypted secrets file:
+
+```sh
+just bootstrap vps admin@x.x.x.x
+```
+
+Add the auth key as a top-level JSON entry, preserving any existing secrets:
+
+```json
+{
+  "tailscale-auth-key": "YOUR_TAILSCALE_AUTH_KEY"
+}
+```
+
+In `settings.nix`, change the existing settings to:
+
+```nix
+tailscale.enable = true;
+access = "public";
+```
+
+Stage the encrypted file and deploy:
+
+```sh
+git add secrets/vps.json
+just deploy admin@x.x.x.x
+ssh admin@x.x.x.x 'tailscale status; tailscale ip -4'
+```
+
+Approve the device in the Tailscale console if your tailnet requires it. From
+your local machine, test SSH using the returned Tailscale IP:
+
+```sh
+ssh admin@100.x.y.z
+```
+
+This uses ordinary OpenSSH over Tailscale and the public key in `settings.nix`;
+it does not enable Tailscale SSH. Your tailnet policy must allow the connection.
+
+After this works, you can change `access = "tailscale"` and deploy through the
+Tailscale IP:
+
+```sh
+just deploy admin@100.x.y.z
+```
+
+Open a new SSH connection through Tailscale to verify access. Future deploy and
+bootstrap commands should use the Tailscale address, or the server's MagicDNS
+name if enabled. This mode closes public host-service ports and trusts the
+Tailscale interface; it does not restrict forwarded container traffic or
+prevent Cloudflare Tunnel from publishing an application.
+
+### Cloudflare Tunnel
+
+This module uses a **locally managed tunnel** with a credentials JSON file,
+not a dashboard-managed tunnel token. You need a domain on Cloudflare. Follow
+[Cloudflare's locally managed tunnel guide](https://developers.cloudflare.com/cloudflare-one/networks/connectors/cloudflare-tunnel/do-more-with-tunnels/local-management/create-local-tunnel/)
+to authorize your account and create a tunnel. On your local machine:
+
+```sh
+nix shell nixpkgs#cloudflared nixpkgs#jq
+cloudflared tunnel login
+cloudflared tunnel create vps
+```
+
+Record the tunnel UUID and credentials file path printed by the command.
+Encode that file as a JSON string for SOPS (replace the example path):
+
+```sh
+jq -Rs . "$HOME/.cloudflared/TUNNEL_UUID.json"
+```
+
+Run `just bootstrap vps admin@x.x.x.x` and add a top-level entry named
+`cloudflared-TUNNEL_UUID.json`, replacing `TUNNEL_UUID` with the real UUID.
+Paste the entire quoted output from `jq` as its value. Preserve existing
+entries. Only the SOPS-encrypted file belongs in Git; keep the original tunnel
+credentials and account certificate outside the repository.
+
+Update the existing block in `settings.nix`:
+
+```nix
+cloudflared = {
+  enable = true;
+  tunnelId = "TUNNEL_UUID";
+};
+```
+
+Add a route inside the module body in `configuration.nix`, using the same UUID:
+
+```nix
+services.cloudflared.tunnels."TUNNEL_UUID".ingress = {
+  "app.example.com" = "http://127.0.0.1:8080";
+};
+```
+
+Replace the hostname and upstream address with your application. It must
+already be running on the VPS at that address. Without ingress routes, the
+tunnel's default response is HTTP 404.
+
+Create the DNS route from your local machine:
+
+```sh
+cloudflared tunnel route dns TUNNEL_UUID app.example.com
+```
+
+Stage the encrypted secrets and deploy using your current SSH address:
+
+```sh
+git add secrets/vps.json
+just deploy admin@x.x.x.x
+```
+
+Use the Tailscale address instead if you have restricted host access. Visit
+`https://app.example.com` to check the application. This publishes the app;
+configure application authentication or Cloudflare Access if it should be private.
+To inspect tunnel logs, run this on the VPS with your real UUID:
+
+```sh
+sudo journalctl -u cloudflared-tunnel-TUNNEL_UUID.service -n 50 --no-pager
+```
