@@ -9,6 +9,9 @@
   ];
 
   nix.settings.experimental-features = ["nix-command" "flakes"];
+  # Admin already manages the system through sudo. Trust it to import build outputs.
+  # A trusted Nix user has root-equivalent privileges without a sudo password.
+  nix.settings.trusted-users = ["admin"];
 
   assertions = [
     {

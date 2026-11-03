@@ -18,6 +18,9 @@ let
       }).config.system.build.toplevel.drvPath
     )).success;
   results = {
+    adminTrusted = builtins.elem "admin" flake.nixosConfigurations.vps.config.nix.settings.trusted-users;
+    rootTrusted = builtins.elem "root" flake.nixosConfigurations.vps.config.nix.settings.trusted-users;
+    signaturesRequired = flake.nixosConfigurations.vps.config.nix.settings.require-sigs;
     configured = evaluates validHash [validKey];
     missingPassword = !(evaluates null [validKey]);
     emptyPassword = !(evaluates "" [validKey]);
