@@ -65,7 +65,7 @@ if operation == "build":
         link = Path(build[build.index("--out-link") + 1])
         self.assertFalse(link.parent.exists())
         self.assertIn("--no-check-sigs", copy)
-        self.assertIn("--use-substitutes", copy)
+        self.assertIn("--substitute-on-destination", copy)
         self.assertNotIn("--from", copy)
         self.assertEqual(copy[copy.index("--to") + 1], "ssh-ng://admin@vps")
         self.assertIn("sudo /run/current-system/sw/bin/nixos-rebuild", activate[-1])

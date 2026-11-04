@@ -34,7 +34,7 @@ fi
 # The selected builder is trusted to produce this system. Only this copy skips
 # signatures; the target daemon must trust the SSH account (admin or root).
 if [[ "$builder" != "ssh-ng://$target" ]]; then
-    if ! nix --extra-experimental-features nix-command copy --use-substitutes \
+    if ! nix --extra-experimental-features nix-command copy --substitute-on-destination \
         --no-check-sigs "${copy_options[@]}" --to "ssh-ng://$target" "$system_path"; then
         echo 'Transfer failed. The target SSH account must be a trusted Nix user. For an existing VPS, see the trusted-builds bootstrap instructions.' >&2
         exit 1
