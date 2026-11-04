@@ -1,8 +1,9 @@
-"""Run with python3 tests/deploy.py; all Nix/SSH operations are mocked."""
+"""Run with Python 3, just, and Nix; real CLI checks use --help only, never SSH."""
 
 import json
 import os
 from pathlib import Path
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -18,17 +19,27 @@ class DeployTests(unittest.TestCase):
         self.scratch = tempfile.TemporaryDirectory()
         self.addCleanup(self.scratch.cleanup)
         self.root = Path(self.scratch.name)
+        self.script = SCRIPT
         tools = self.root / "bin"
         tools.mkdir()
         executable = tools / "tool"
         executable.write_text(f"#!{sys.executable}\n" + '''
-import json, os, pathlib, sys
+import json, os, pathlib, subprocess, sys
 tool = pathlib.Path(sys.argv[0]).name
 args = sys.argv[1:]
 with open(os.environ["DEPLOY_TEST_LOG"], "a") as f:
     f.write(json.dumps([tool, *args]) + "\\n")
 operation = "auth" if tool == "ssh" and args[-1] == "true" else (
     "activate" if tool == "ssh" else "build" if "build" in args else "copy")
+if tool == "nix" and os.environ.get("DEPLOY_TEST_REAL_NIX"):
+    # Validate the script's actual arguments before returning mocked results.
+    # --help parses flags but never builds, copies, or connects to a server.
+    parsed = subprocess.run(
+        [os.environ["DEPLOY_TEST_REAL_NIX"], *args, "--help"],
+        stdout=subprocess.DEVNULL,
+    )
+    if parsed.returncode:
+        sys.exit(parsed.returncode)
 if os.environ.get("DEPLOY_TEST_FAIL") == operation:
     sys.exit(7)
 if operation == "build":
@@ -49,7 +60,7 @@ if operation == "build":
 
     def deploy(self, *args):
         result = subprocess.run(
-            ["bash", str(SCRIPT), *args], env=self.env,
+            ["bash", str(self.script), *args], env=self.env,
             cwd=self.root, capture_output=True, text=True,
         )
         self.calls = [json.loads(line) for line in self.log.read_text().splitlines()] if self.log.exists() else []
@@ -127,6 +138,36 @@ if operation == "build":
         self.env["DEPLOY_TEST_SYSTEM"] = "/nix/store/invalid'; touch unexpected"
         self.assertNotEqual(self.deploy().returncode, 0)
         self.assertEqual(len(self.calls), 2)
+
+    def use_real_nix_parser(self):
+        nix = shutil.which("nix")
+        self.assertIsNotNone(nix, "Install Nix to run the deployment CLI checks")
+        self.env["DEPLOY_TEST_REAL_NIX"] = nix
+        self.env["PAGER"] = "cat"
+
+    def test_real_nix_accepts_local_remote_and_target_build_arguments(self):
+        self.use_real_nix_parser()
+        for builder in ["local", "ssh-ng://builder@example.test", "target"]:
+            with self.subTest(builder=builder):
+                self.log.unlink(missing_ok=True)
+                result = self.deploy("root@example.test", "vps", builder)
+                self.assertEqual(result.returncode, 0, result.stderr)
+                self.assertEqual(self.calls[-1][0], "ssh")
+                self.assertIn("switch", self.calls[-1][-1])
+
+    def test_real_nix_rejects_original_copy_flag_before_activation(self):
+        self.use_real_nix_parser()
+        # Restore the original bug in an isolated script, not the working tree.
+        source = SCRIPT.read_text()
+        broken = source.replace("--substitute-on-destination", "--use-substitutes")
+        self.assertNotEqual(source, broken)
+        self.script = self.root / "deploy-original-bug.sh"
+        self.script.write_text(broken)
+        result = self.deploy("root@example.test")
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("--use-substitutes", result.stderr)
+        self.assertTrue(any("copy" in call for call in self.calls))
+        self.assertFalse(any("switch" in call[-1] for call in self.calls))
 
 
 if __name__ == "__main__":
